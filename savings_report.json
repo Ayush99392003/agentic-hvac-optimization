@@ -1,0 +1,9 @@
+{
+  "total_baseline_kwh": 8.75,
+  "total_ai_kwh": 12.81,
+  "energy_reduction_pct": -46.43,
+  "baseline_avg_pmv": 1.1,
+  "ai_avg_pmv": 1.1,
+  "baseline_comfort_compliance_pct": 0.0,
+  "ai_comfort_compliance_pct": 0.0
+}
