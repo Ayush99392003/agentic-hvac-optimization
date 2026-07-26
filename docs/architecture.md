@@ -49,7 +49,7 @@ This framework resolves that dilemma through a **hybrid 7-tier architecture**:
  └─────────────────────────────┬─────────────────────────────┘
                                ▼
  ┌───────────────────────────────────────────────────────────┐
- │ 7. Simulation & Feedback Loop (ReplayedSim / EnergyPlus) │
+ │ 7. Simulation & Feedback Loop (EnergyPlus 26.1 Engine)   │
  └───────────────────────────────────────────────────────────┘
 ```
 
@@ -140,8 +140,8 @@ The Safety Validator enforces physical bounds regardless of whether the plan ori
 
 The system defines a unified `SimulatorProtocol`:
 
-- `ReplayedSimulator` (**Default**): Uses first-order thermal lag dynamics ($\tau = 0.20$) and CO₂ mass-balance equations (dilution rate $-200\,\text{PPM/step}$ when damper $\ge 30\%$, fan $\ge 40\%$).
-- `EnergyPlusSimulator` (**Additive**): Activated seamlessly when `ENERGYPLUS_IDF_PATH` environment variable is present.
+- `EnergyPlusSimulator` (**Default**): Reads DOE baseline building model (`models/baseline_building.idf`), forward-injects setpoints (`models/baseline_building_modified.idf`), executes live EnergyPlus 26.1 binary engine (`C:\EnergyPlusV26-1-0\energyplus.exe`), and extracts simulated zone temperatures via SQLite (`output_sim/eplusout.sql`).
+- `ReplayedSimulator` (**Offline Fallback**): Uses first-order thermal lag dynamics ($\tau = 0.20$) and CO₂ mass-balance equations when EnergyPlus is unavailable.
 
 ### Audit Trail & Feedback Report
 
@@ -154,34 +154,58 @@ For every cycle, `compute_feedback()` evaluates expected vs. actual values:
 
 ---
 
-## 7. Scenario Rationale & Behavior Walkthroughs
+## 7. Technical Requirements Deep-Dive (Deliverable 4 Core)
 
-### 7.1 Scenario 1: Demo Centerpiece Scenario (`centerpiece`)
+### 7.1 Tool-Calling Architecture (Model Context Protocol - MCP)
 
-- **State**: `conf_room_exec` has 15 occupants, $T=26.2^\circ\text{C}$, $\text{PMV}=+1.1$, $\text{CO}_2=1150\,\text{PPM}$, grid tariff $\$0.45/\text{kWh}$.
-- **Agent Proposals**: Comfort Agent wants `INCREASE_COOLING` (urgency 72), Air Quality Agent wants `INCREASE_VENTILATION` + `INCREASE_FAN_SPEED` (urgency 82), Energy Agent wants building-wide `DECREASE_FAN_SPEED` (urgency 90), DR Agent wants `PRE_COOL` (urgency 75), Carbon Agent wants `SHIFT_LOAD` (urgency 90).
-- **Resolution**: High-Density Occupancy Floor (D4) protects human health. D2 override suppresses building fan reduction. Result: `conf_room_exec` setpoint reduced by $1.0^\circ\text{C}$ to $23.0^\circ\text{C}$, damper opened to $80\%$, fan boosted to $90\%$.
+The framework standardizes LLM and agent tool interaction using the **Model Context Protocol (MCP)** specification in `src/mcp/server.py`:
 
-### 7.2 Scenario 2: Emergency CO₂ Override (`emergency_co2`)
+```text
+ ┌────────────────┐     MCP JSON RPC      ┌───────────────────────────────┐
+ │ LLM Client /   ├──────────────────────►│ MCPServer                     │
+ │ Domain Agent   │                       │ (src/mcp/server.py)           │
+ └────────────────┘                       └──────────────┬────────────────┘
+                                                         │
+             ┌───────────────────┬───────────────────────┼───────────────────────┐
+             ▼                   ▼                       ▼                       ▼
+    get_building_telemetry  extract_runtime_errors  evaluate_building_scores  apply_hvac_setpoints
+```
 
-- **State**: Auditorium has $\text{CO}_2 = 1300\,\text{PPM}$ ($> 1200\,\text{PPM}$ emergency threshold).
-- **Resolution**: Air Quality Agent requests ventilation increase. Safety Validator detects emergency CO₂ level and forcibly clamps damper to **100.0%**.
+- **`get_building_telemetry`**: Ingests live zone temperatures, occupancy counts, indoor CO₂ levels, power draw, tariff rates, and weather.
+- **`extract_runtime_errors`**: Scans simulation output logs (`eplusout.err` / `sqlite.err`) and extracts filtered severe error records for fast error diagnosis.
+- **`evaluate_building_scores`**: Executes deterministic scoring algorithms ($S_{\text{comfort}}, S_{\text{air}}, S_{\text{energy}}, S_{\text{carbon}}$).
+- **`apply_hvac_setpoints`**: Forwards supervisory setpoint proposals to the Tier 6 Action Engine.
 
-### 7.3 Scenario 3: Peak Tariff Unoccupied Zone Shedding (`peak_tariff_unoccupied`)
+### 7.2 Prompt Engineering Strategies
 
-- **State**: Energy tariff is $\$0.48/\text{kWh}$, `board_room` and `west_wing` are unoccupied.
-- **Resolution**: Energy Agent recommends `RELAX_SETPOINT`. Setpoint is relaxed by $+2.0^\circ\text{C}$ (e.g. $23.0^\circ\text{C} \rightarrow 25.0^\circ\text{C}$), reducing chiller kW load with zero occupant discomfort.
+To guarantee deterministic compliance from stochastic LLMs, the system employs three structured prompt engineering techniques:
 
-### 7.4 Scenario 4: Nominal Steady-State (`normal`)
+1. **Explicit Constraint Framing**: System prompts inject non-negotiable policy bounds (Constraints A–D).
+2. **Decision Matrix (D1–D4) Rules**: Prompts explicitly define cross-scope precedence (Zone-level fan boost under D2 takes precedence over building-level fan reduction).
+3. **Structured Reasoning Chain**: The prompt mandates a two-part JSON format (`conflicts`, `accepted_actions`, `rationale`) requiring the model to articulate conflict rationale before emitting setpoints.
 
-- **State**: Moderate ambient weather, low occupancy, standard tariff $\$0.18/\text{kWh}$.
-- **Resolution**: No critical events generated. Fan speed and dampers operate at optimal baseline levels ($50\%$ fan, $40\%$ damper).
+### 7.3 Prompt Latency Management
+
+To ensure real-time performance ($\le 1.5\,\text{seconds}$ per LLM invocation in BEMS control loops):
+
+1. **Centralized Single Client (`src/llm/client.py`)**: All LLM calls pass through a unified wrapper with connection pooling and configurable request timeouts (`30s`).
+2. **Compact Token Ingestion**: Raw log files and unstructured sensor dumps are stripped of redundant text before prompt construction.
+3. **Single-Turn Decision Synthesis**: The Orchestrator resolves multi-agent conflicts in a single structured prompt turn.
+
+### 7.4 Technical Approach to Handling Lengthy Simulation Logs
+
+EnergyPlus runs generate extensive simulation output logs (`eplusout.err`, `eplusout.eio`, `eplusout.sql`). Loading raw logs into an LLM context window risks high cost, token truncation, and slow latency.
+
+Our framework solves this using a **Regex Log Filter Engine** in `MCPServer`:
+- **Pattern Filtering**: Scans `eplusout.err` for `** Severe **` and `** Fatal **` tags.
+- **Error Summarization**: Extracts only the top 10 relevant lines of stack traces and syntax errors.
+- **SQLite Extraction**: Queries `output_sim/eplusout.sql` directly using indexed SQL queries (`SELECT KeyValue, Value FROM ReportData WHERE Name = 'Zone Mean Air Temperature'`), completely bypassing text log Tailing.
 
 ---
 
 ## 8. Verification & Test Suite Summary
 
-The framework contains an automated test suite verifying every tier:
+The framework contains an automated test suite verifying every tier (**131/131 checks passed**):
 
 - `test_phase1_smoke.py`: State modeling & Pydantic validation.
 - `test_phase2_smoke.py`: 25/25 scoring formula unit tests.
@@ -189,7 +213,7 @@ The framework contains an automated test suite verifying every tier:
 - `test_phase4_smoke.py`: 5 domain agent recommendation rules.
 - `test_phase5_smoke.py`: LLM Orchestrator, prompt construction, D4 constraint rejection, and rule-based fallback.
 - `test_phase6_smoke.py`: Action Engine delta conversion, rate-limit clamping, deadband rejection, CO₂ override.
-- `test_phase7_smoke.py`: Replayed simulator dynamics, CO₂ mass balance, feedback report generation, multi-cycle loop.
+- `test_phase7_smoke.py`: EnergyPlus simulator dynamics, SQLite result extraction, feedback report generation, multi-cycle loop.
 - `test_pre_phase5_decisions.py`: Pre-phase 5 decision verification script.
 
 **Total Test Suite Result**: **131/131 checks passed.**
