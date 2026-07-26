@@ -1,0 +1,28 @@
+[project]
+name = "honeywell-hvac"
+version = "0.1.0"
+description = "Agentic Building Energy & HVAC Optimization Framework"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "eppy>=0.5.69",
+    "openai>=2.48.0",
+    "pydantic>=2.13.4",
+    "rich>=15.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
