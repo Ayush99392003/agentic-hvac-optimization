@@ -103,12 +103,19 @@ class EnergyPlusWrapper:
             else 24.0
         )
 
-        # Forward-inject into Office Cooling Schedule
+        # Forward-inject into CLGSETP_SCH (Cooling Setpoint Schedule)
         modified_content = re.sub(
-            r"(Schedule:Compact,\s*Office Cooling Schedule,[\s\S]*?Until:\s*24:00,\s*)([\d.]+)(;)",
+            r"(Schedule:Compact,\s*CLGSETP_SCH,[\s\S]*?Until:\s*22:00,\s*)([\d.]+)(,)",
             rf"\g<1>{new_cooling_setpoint:.1f}\g<3>",
             content,
         )
+        if modified_content == content:
+            # Fallback for alternative schedule naming
+            modified_content = re.sub(
+                r"(Schedule:Compact,\s*Office Cooling Schedule,[\s\S]*?Until:\s*24:00,\s*)([\d.]+)(;)",
+                rf"\g<1>{new_cooling_setpoint:.1f}\g<3>",
+                content,
+            )
 
         # Write output IDF artifact
         os.makedirs(os.path.dirname(self.modified_path), exist_ok=True)
