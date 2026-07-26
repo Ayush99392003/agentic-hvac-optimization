@@ -2,7 +2,8 @@
 
 **System**: Autonomous Agentic Building Control & Energy Optimization Framework  
 **Version**: 1.0.0 (Phases 1–7 Complete End-to-End Implementation)  
-**Status**: Approved & Fully Verified Specification (131/131 Tests Passing)
+**Status**: Approved & Fully Verified Specification (131/131 Tests Passing)  
+**PoC Video Demo (Loom Walkthrough)**: [https://www.loom.com/share/29b82340123f4cc892b033f054a786de](https://www.loom.com/share/29b82340123f4cc892b033f054a786de)
 
 ---
 

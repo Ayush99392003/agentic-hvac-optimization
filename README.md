@@ -1,6 +1,8 @@
 # Autonomous Agentic Building Control & Energy Optimization Framework
 
-> **Honeywell HVAC Optimization System** — Hybrid Deterministic + LLM 7-Tier Architecture for Intelligent Building Control.
+> **Honeywell HVAC Optimization System** — Hybrid Deterministic + LLM 7-Tier Architecture for Intelligent Building Control & EnergyPlus Co-Simulation.
+
+🎥 **PoC Video Demo (Loom Walkthrough)**: [Watch 3-Minute Video Demo](https://www.loom.com/share/29b82340123f4cc892b033f054a786de)
 
 ---
 

@@ -3993,7 +3993,7 @@
     Through: 12/31,          !- Field 1
     For: Weekdays SummerDesignDay, !- Field 2
     Until: 06:00,26.7,       !- Field 3
-    Until: 22:00,23.5,       !- Field 5
+    Until: 22:00,22.0,       !- Field 5
     Until: 24:00,26.7,       !- Field 7
     For: Saturday,           !- Field 9
     Until: 06:00,26.7,       !- Field 10
